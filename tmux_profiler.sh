@@ -15,6 +15,7 @@ then
 	tmux send-keys -t profiler:0.1 'vim profiler.c' C-m
 	tmux send-keys -t profiler:0.2 \
 		'~/Dropbox/Charlie/Scripts/git_live_log.sh' C-m
+	tmux select-pane -t profiler:0.0
 	tmux select-pane -t profiler:0.1
 fi
 tmux attach -t profiler
