@@ -81,9 +81,8 @@ void usage(char *);
 void add_to_linked_list(Instruction, Instruction, Block_hashtab *);
 void update_block_end(Instruction, Instruction, Block_hashtab *);
 Block_hashtab_entry *get_block_containing_inst(Instruction, Block_hashtab *);
-void split_block_new_end(Instruction, Instruction, Block_hashtab *);
+void split_block(Instruction, Instruction, Instruction, Block_hashtab *);
 void update_block_start(Instruction, Block_hashtab *);
-void split_block_new_start(Instruction, Instruction, Block_hashtab *);
 void print_block_profile(Block_hashtab *);
 
 int main(int argc, char *argv[]) {
@@ -274,7 +273,14 @@ void update_block_end(Instruction start, Instruction end, Block_hashtab *ht) {
 	containing_block = get_block_containing_inst(end, ht);
 	while (containing_block != NULL) {
 		// split containing_block, if there is one, at "end"
-		split_block_new_end(containing_block->start_inst, end, ht);
+		Instruction new_block_start;
+		new_block_start.addr = end.addr + end.len;
+		new_block_start.len = 0;
+		// usage:
+		// split_block(orig_block_start, orig_block_new_end,
+		//             new_block_start, ht)
+		split_block(containing_block->start_inst, end, new_block_start, ht);
+
 		// check if there is another containing_block
 		containing_block = get_block_containing_inst(end, ht);
 	}
@@ -315,7 +321,7 @@ Block_hashtab_entry *get_block_containing_inst(Instruction inst,
         while (entry != NULL) {
 			if (entry->start_inst.addr < inst.addr &&
 			    entry->end_inst.addr > inst.addr) {
-				// "addr" is contained within the block
+				// inst is contained within the block
 				//#######################
 				printf("'containing' block found\n");
 				return entry;
@@ -327,20 +333,15 @@ Block_hashtab_entry *get_block_containing_inst(Instruction inst,
 	return NULL;
 }
 
-void split_block_new_end(Instruction orig_block_start,
-                         Instruction orig_block_new_end,
-                         Block_hashtab *ht) {
+void split_block(Instruction orig_block_start, Instruction orig_block_new_end,
+                 Instruction new_block_start, Block_hashtab *ht) {
 	//###############################################
-	printf("split_block_new_end()\n");
+	printf("split_block()\n");
 
-	Instruction new_block_start;
-	new_block_start.addr = orig_block_new_end.addr + \
-	                       orig_block_new_end.len;
-	new_block_start.len = 0;
 	Block_hashtab_entry *orig_block = get_block(orig_block_start, ht);
 	Block_hashtab_entry *new_block = get_block(new_block_start, ht);
-	Inst_list_entry * list;
-	Inst_list_entry * prev_list;
+	Inst_list_entry *list;
+	Inst_list_entry *prev_list;
 	
 	// update new block
 	new_block->end_inst = orig_block->end_inst;
@@ -372,7 +373,6 @@ void split_block_new_end(Instruction orig_block_start,
 	prev_list = list;
 	while (list != NULL) {
 		if (list->inst.addr == new_block_start.addr) {
-			//printf("list->inst.addr: %lu\n", list->inst.addr);
 			new_block->start_inst.len = list->inst.len;
 			new_block->inst_list_head = list;
 			new_block->inst_list_tail = orig_block->inst_list_tail;
@@ -391,6 +391,10 @@ void update_block_start(Instruction start, Block_hashtab *ht) {
 
 	Block_hashtab_entry *containing_block;
 	Block_hashtab_entry *current_block;
+	Instruction orig_block_new_end;
+	Inst_list_entry *list;
+	Inst_list_entry *prev_list;
+	unsigned long extra = 0;
 
 	// test if "start" falls in the middle of any existing blocks
 	// but only for SBBs; don't care if a "leader" is within a DBB
@@ -398,7 +402,25 @@ void update_block_start(Instruction start, Block_hashtab *ht) {
 		containing_block = get_block_containing_inst(start, ht);
 		while (containing_block != NULL) {
 			// split containing_block, if there is one, at "start"
-			split_block_new_start(containing_block->start_inst, start, ht);
+			list = containing_block->inst_list_head;
+			prev_list = list;
+			while (list != NULL) {
+				if (list->inst.addr == start.addr) {
+					orig_block_new_end = prev_list->inst;
+					break;
+				}
+				prev_list = list;
+				list = list->next;
+			}
+			// usage:
+			// split_block(orig_block_start, orig_block_new_end,
+			//             new_block_start, ht)
+			split_block(containing_block->start_inst,
+			                      orig_block_new_end, start, ht);
+			// split_block() sets new.exec_count = old.exec_count - 1
+			// but in this case (new start) they should be equal, so add 1
+			extra = 1; // will be added in below (0 if split_block not run)
+
 			// check if there is another containing_block
 			containing_block = get_block_containing_inst(start, ht);
 		}
@@ -410,17 +432,7 @@ void update_block_start(Instruction start, Block_hashtab *ht) {
 		perror("malloc failure in get_block()");
 		exit(1);
 	}
-	current_block->exec_count += 1;
-}
-
-void split_block_new_start(Instruction orig_block_start,
-                           Instruction new_block_start,
-                           Block_hashtab *ht) {
-	//###############################################
-	printf("split_block_new_start()\n");
-
-	//################# need procedure body! ####################
-	return;
+	current_block->exec_count += (1 + extra);
 }
 
 void print_block_profile(Block_hashtab *ht) {
