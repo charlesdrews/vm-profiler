@@ -67,14 +67,18 @@ unsigned int hash(Instruction, unsigned int); //###### int or long? #####
 Block_hashtab *create_block_hashtab(unsigned int, BB_Type);
 Block_hashtab_entry *lookup_block(Instruction, Block_hashtab *);
 Block_hashtab_entry *get_block(Instruction, Block_hashtab *);
-Inst_list_entry *create_inst_list_entry(Instruction);
 void free_block_hashtab(Block_hashtab *);
+
+Inst_list_entry *create_inst_list_entry(Instruction);
+void free_inst_list(Inst_list_entry *);
+
 Jump_hashtab *create_jump_hashtab(unsigned int);
 Jump_hashtab_entry *lookup_jump(Instruction, Jump_hashtab *);
 Jump_hashtab_entry *get_jump(Instruction, Jump_hashtab *);
 void free_jump_hashtab(Jump_hashtab *);
 
 void usage(char *);
+void add_to_linked_list(Instruction, Instruction, Block_hashtab *);
 void update_block_end(Instruction, Instruction, Block_hashtab *);
 Block_hashtab_entry *get_block_containing_inst(Instruction, Block_hashtab *);
 void split_block_new_end(Instruction, Instruction, Block_hashtab *);
@@ -173,6 +177,8 @@ int main(int argc, char *argv[]) {
 			get_jump(prev_inst, jump_ht); // disregard return
 		}
 		else { // if contig == TRUE
+
+			
 			if (lookup_jump(prev_inst, jump_ht) != NULL) {
 				//#####################
 				//printf("lookup_jump not null\n");
@@ -212,9 +218,8 @@ int main(int argc, char *argv[]) {
 			curr_DBB_start_inst = curr_inst;
 		}
 
-		//#################################################
-		//if prev doesn't end the block, add curr_inst to
-		//current block's linked list if not already there
+		add_to_linked_list(curr_SBB_start_inst, curr_inst, SBB_ht);
+		add_to_linked_list(curr_DBB_start_inst, curr_inst, DBB_ht);
 
 		//#################################################
 		//if (line_num > 20) break; // testing only - stop after x lines
@@ -241,6 +246,21 @@ int main(int argc, char *argv[]) {
 
 void usage(char *exe) {
     printf("Usage: %s address_stream_file.txt\n", exe);
+}
+
+void add_to_linked_list(Instruction start, Instruction curr,
+                        Block_hashtab *ht) {
+		// add curr to start's block's instructin linked list
+		// if not already there (if this is first time seeing block)
+		Block_hashtab_entry *block = get_block(start, ht);
+		//######### should test for null return from get_block() #########
+		unsigned long tail_addr = block->inst_list_tail->inst.addr;
+		unsigned long tail_len = block->inst_list_tail->inst.len;
+		if (curr.addr == tail_addr + tail_len) {
+			Inst_list_entry *entry = create_inst_list_entry(curr);
+			block->inst_list_tail->next = entry;
+			block->inst_list_tail = entry;
+		}
 }
 
 void update_block_end(Instruction start, Instruction end, Block_hashtab *ht) {
@@ -319,6 +339,8 @@ void split_block_new_end(Instruction orig_block_start,
 	new_block_start.len = 0;
 	Block_hashtab_entry *orig_block = get_block(orig_block_start, ht);
 	Block_hashtab_entry *new_block = get_block(new_block_start, ht);
+	Inst_list_entry * list;
+	Inst_list_entry * prev_list;
 	
 	// update new block
 	new_block->end_inst = orig_block->end_inst;
@@ -330,10 +352,6 @@ void split_block_new_end(Instruction orig_block_start,
 	new_block->fall_thru_count = orig_block->fall_thru_count;
 	new_block->target_1_count = orig_block->target_1_count;
 	new_block->target_2_count = orig_block->target_2_count;
-
-	//############### update inst_list_head/tail ################
-	//Inst_list_entry *inst_list_head;
-	//Inst_list_entry *inst_list_tail;
 
 	// update original block
 	orig_block->end_inst = orig_block_new_end;
@@ -347,6 +365,24 @@ void split_block_new_end(Instruction orig_block_start,
 	orig_block->target_2_inst.addr = 0;
 	orig_block->target_2_inst.len = 0;
 	orig_block->target_2_count = 0;
+
+	// split orig_block's Instruction linked list with new_block
+	free_inst_list(new_block->inst_list_head); // has one entry we don't want
+	list = orig_block->inst_list_head;
+	prev_list = list;
+	while (list != NULL) {
+		if (list->inst.addr == new_block_start.addr) {
+			//printf("list->inst.addr: %lu\n", list->inst.addr);
+			new_block->start_inst.len = list->inst.len;
+			new_block->inst_list_head = list;
+			new_block->inst_list_tail = orig_block->inst_list_tail;
+			orig_block->inst_list_tail = prev_list;
+			orig_block->inst_list_tail->next = NULL;
+			break;
+		}
+		prev_list = list;
+		list = list->next;
+	}
 }
 
 void update_block_start(Instruction start, Block_hashtab *ht) {
@@ -390,6 +426,7 @@ void split_block_new_start(Instruction orig_block_start,
 void print_block_profile(Block_hashtab *ht) {
     unsigned int i;
     Block_hashtab_entry *entry;
+	Inst_list_entry *list;
 
     if (ht == NULL) {
         return;
@@ -402,9 +439,17 @@ void print_block_profile(Block_hashtab *ht) {
         while (entry != NULL) {
 			if (entry->start_inst.addr != 0) {
 				// first instruction is "jump" from initialized zeros; ignore
+
+				//###################################
 				printf("block %lu - %lu: executed %lu time(s)\n",
 						entry->start_inst.addr, entry->end_inst.addr,
 				        entry->exec_count);
+				
+				list = entry->inst_list_head;
+				while (list != NULL) {
+					printf("I %lu\n", list->inst.addr);
+					list = list->next;
+				}
 				//###################################
 				//printf("edges \n");
 			}
@@ -423,7 +468,8 @@ void print_block_profile(Block_hashtab *ht) {
 
 unsigned int hash(Instruction inst, unsigned int ht_size) {
 	// naive hashing function
-    return (unsigned int) (inst.addr % ht_size);
+    //return (unsigned int) (inst.addr % ht_size);
+    return (inst.addr % ht_size);
 	//################ is the cast necessary? #################
 }
 
@@ -507,19 +553,6 @@ Block_hashtab_entry *get_block(Instruction inst, Block_hashtab *ht) {
     return entry;
 }
 
-Inst_list_entry *create_inst_list_entry(Instruction inst) {
-	// attempt to allocate memory for Inst_list_entry struct
-	Inst_list_entry *entry;
-	if ((entry = malloc(sizeof(Inst_list_entry))) == NULL) {
-		return NULL;
-	}
-
-	entry->inst.addr = inst.addr;
-	entry->inst.len = inst.len;
-	entry->next = NULL;
-	return entry;
-}
-
 void free_block_hashtab(Block_hashtab *ht) {
     unsigned int i;
     Block_hashtab_entry *entry;
@@ -536,17 +569,37 @@ void free_block_hashtab(Block_hashtab *ht) {
         while (entry != NULL) {
             temp = entry;
             entry = entry->next;
+			free_inst_list(temp->inst_list_head);
             free(temp); // free that node
         }
     }
-
-	//################ free inst linked list!!!! #####################
 
     // free the table
     free(ht->table);
     free(ht);
 }
 
+Inst_list_entry *create_inst_list_entry(Instruction inst) {
+	// attempt to allocate memory for Inst_list_entry struct
+	Inst_list_entry *entry;
+	if ((entry = malloc(sizeof(Inst_list_entry))) == NULL) {
+		return NULL;
+	}
+
+	entry->inst.addr = inst.addr;
+	entry->inst.len = inst.len;
+	entry->next = NULL;
+	return entry;
+}
+
+void free_inst_list(Inst_list_entry *head) {
+	Inst_list_entry *temp;
+	while (head != NULL) {
+		temp = head;
+		head = head->next;
+		free(temp); // free that node
+	}
+}
 
 Jump_hashtab *create_jump_hashtab(unsigned int size) {
     Jump_hashtab *ht;
