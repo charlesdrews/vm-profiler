@@ -3,5 +3,5 @@ CFLAGS=-Wall -Wextra
 SOURCES=profiler.c
 EXE=profiler
 
-all: $(SOURCES) $(EXE)
+all: $(SOURCES)
 	$(CC) $(CFLAGS) -o $(EXE) $(SOURCES)

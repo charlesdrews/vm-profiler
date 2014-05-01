@@ -56,6 +56,8 @@ Jump_hashtab_entry *get_jump(unsigned long, Jump_hashtab *);
 void free_jump_hashtab(Jump_hashtab *);
 
 void usage(char *);
+void update_block_end(unsigned long, unsigned long, Block_hashtab *);
+void update_block_start(unsigned long, Block_hashtab *);
 
 int main(int argc, char *argv[]) {
 	if (argc != 2) {
@@ -161,84 +163,26 @@ int main(int argc, char *argv[]) {
 				fall_thru = FALSE;
 		}
 	
-		if (prev_addr_end_SBB) {
-			// deal with prev_addr as a block ender
-			block = get_block(curr_SBB_start_addr, SBB_ht);
-			if (block == NULL) {
-				perror("malloc failure in get_block()");
-				exit(1);
-			}
-			if (block->end_addr != 0 && block->end_addr != prev_addr) {
-				//###################
-				printf("Need to split SBB %lu\n", block->start_addr);
-			}
-			else {
-				block->end_addr = prev_addr;
-				printf("SBB %lu ends with %lu\n",
-						block->start_addr, block->end_addr);
-			}
-
-			// deal with curr_addr as a block starter
-			block = get_block(curr_addr, SBB_ht);
-			if (block == NULL) {
-				perror("malloc failure in get_block()");
-				exit(1);
-			}
-			block->exec_count += 1;
-
-			// reset curr_SBB_start_addr
-			curr_SBB_start_addr = curr_addr;
-		}
-
-		if (prev_addr_end_DBB) {
-			// deal with prev_addr as a block ender
-			block = get_block(curr_DBB_start_addr, DBB_ht);
-			if (block == NULL) {
-				perror("malloc failure in get_block()");
-				exit(1);
-			}
-			if (block->end_addr != 0) {
-				//###################
-				printf("Need to split DBB %lu\n", block->start_addr);
-			}
-			else {
-				block->end_addr = prev_addr;
-				printf("DBB %lu ends with %lu\n",
-						block->start_addr, block->end_addr);
-			}
-
-			// deal with curr_addr as a block starter
-			block = get_block(curr_addr, DBB_ht);
-			if (block == NULL) {
-				perror("malloc failure in get_block()");
-				exit(1);
-			}
-			block->exec_count += 1;
-
-			// reset curr_DBB_start_addr
-			curr_DBB_start_addr = curr_addr;
-		}
-
 		//#######################################
 		printf("contig = %d\n", contig);
 		printf("prev_end_SBB = %d\n", prev_addr_end_SBB);
 		printf("prev_end_DBB = %d\n", prev_addr_end_DBB);
 		printf("fall_thru = %d\n", fall_thru);
 		
+		if (prev_addr_end_SBB) {
+			update_block_end(curr_SBB_start_addr, prev_addr, SBB_ht);
+			update_block_start(curr_addr, SBB_ht);
+			curr_SBB_start_addr = curr_addr;
+		}
+
+		if (prev_addr_end_DBB) {
+			update_block_end(curr_DBB_start_addr, prev_addr, DBB_ht);
+			update_block_start(curr_addr, DBB_ht);
+			curr_DBB_start_addr = curr_addr;
+		}
+
 		//#################################################
 		if (line_num > 20) break; // testing only - stop after x lines
-
-		/* example of using get_block():
-		Block_hashtab_entry *b = get_block(curr_addr, SBB_ht);
-		if (b == NULL) {
-			perror("malloc failure in get_block()");
-			exit(1);
-		}
-		// b is returned w/ b->start_addr = curr_addr
-		b->end_addr = whatever;
-		b->target_1_addr = whatever;
-		b->target_1_addr += 1;
-		*/
 	}
 
 	// wrap it up
@@ -251,6 +195,34 @@ int main(int argc, char *argv[]) {
 
 void usage(char *exe) {
     printf("Usage: %s address_stream_file.txt\n", exe);
+}
+
+void update_block_end(unsigned long start, unsigned long end,
+                      Block_hashtab *ht) {
+	Block_hashtab_entry *block = get_block(start, ht);
+	if (block == NULL) {
+		perror("malloc failure in get_block()");
+		exit(1);
+	}
+	if (block->end_addr != 0 && block->end_addr != end) {
+		//###################################
+		printf("Need to split block %lu\n", block->start_addr);
+	}
+	else {
+		block->end_addr = end;
+		//################################
+		printf("block %lu ends with %lu\n",
+				block->start_addr, block->end_addr);
+	}
+}
+
+void update_block_start(unsigned long start, Block_hashtab *ht) {
+	Block_hashtab_entry *block = get_block(start, ht);
+	if (block == NULL) {
+		perror("malloc failure in get_block()");
+		exit(1);
+	}
+	block->exec_count += 1;
 }
 
 unsigned int hash(unsigned long addr, unsigned int ht_size) {
