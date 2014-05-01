@@ -58,6 +58,7 @@ void free_jump_hashtab(Jump_hashtab *);
 void usage(char *);
 void update_block_end(unsigned long, unsigned long, Block_hashtab *);
 void update_block_start(unsigned long, Block_hashtab *);
+void print_block_profile(Block_hashtab *);
 
 int main(int argc, char *argv[]) {
 	if (argc != 2) {
@@ -82,8 +83,8 @@ int main(int argc, char *argv[]) {
 	Boolean fall_thru = FALSE; // was prev_addr a conditional branch not taken?
 	Block_hashtab *SBB_ht = NULL;
 	Block_hashtab *DBB_ht = NULL;
-	Block_hashtab_entry *block = NULL;
 	Jump_hashtab *jump_ht = NULL;
+	//Block_hashtab_entry *block = NULL;
 	//Jump_hashtab_entry *jump = NULL;
     
 	// open specified input file; check if successful
@@ -116,26 +117,21 @@ int main(int argc, char *argv[]) {
 		//#################################################
         line_num++; // testing only - stop after x lines
 
-		// capture tokens from last iteration
 		prev_addr = curr_addr;
 		prev_len = curr_len;
-
-		// get first token from current line
-        token = strtok(line, " ,");
+        token = strtok(line, " ,"); // first token is addr type I/L/S/M
 		
-		// skip to next iteration of while loop if not an "I" line
-		if (token[0] != 'I') {
-			continue;
-		} // otherwise contiue with this loop iteration
+		if (token[0] != 'I') { // if address is not an Instruction
+			continue;          // then skip to next loop iteration
+		}
 
-		// capture additional tokens from line
 		curr_addr = strtoul(strtok(NULL, " ,"), NULL, 16); // hexadecimal
 		curr_len = strtoul(strtok(NULL, " ,"), NULL, 10);  // decimal
 
 		//###########################################
 		printf("\n%lu, %lu\n", curr_addr, curr_len);
 		
-		// test if curr_addr is contiguous from prev_addr
+		// test if jump just occured from prev_addr to curr_addr
 		contig = ((prev_addr + prev_len) == curr_addr);
 
 		if (!contig) { // if contig == FALSE
@@ -148,19 +144,24 @@ int main(int argc, char *argv[]) {
 		}
 		else { // if contig == TRUE
 			if (lookup_jump(prev_addr, jump_ht) != NULL) {
+				//#####################
+				//printf("lookup_jump not null\n");
 				prev_addr_end_SBB = TRUE;
 				prev_addr_end_DBB = TRUE;
 				fall_thru = TRUE;
 			}
 			else if ( lookup_block(curr_addr, SBB_ht) != NULL ) {
+				//#########################
+				//printf("lookup_jump null, but lookup block not null\n");
 				prev_addr_end_SBB = TRUE;
 				prev_addr_end_DBB = FALSE; // only if prev was jump
 				fall_thru = FALSE;
 			}
-			else // prev_addr not jump, curr_addr not target
+			else { // prev_addr not jump, curr_addr not target
 				prev_addr_end_SBB = FALSE;
 				prev_addr_end_DBB = FALSE;
 				fall_thru = FALSE;
+			}
 		}
 	
 		//#######################################
@@ -184,6 +185,11 @@ int main(int argc, char *argv[]) {
 		//#################################################
 		if (line_num > 20) break; // testing only - stop after x lines
 	}
+
+	printf("\nSBB block profile:\n");
+	print_block_profile(SBB_ht);
+	printf("\nDBB block profile:\n");
+	print_block_profile(DBB_ht);
 
 	// wrap it up
 	free_block_hashtab(SBB_ht);
@@ -223,6 +229,28 @@ void update_block_start(unsigned long start, Block_hashtab *ht) {
 		exit(1);
 	}
 	block->exec_count += 1;
+}
+
+void print_block_profile(Block_hashtab *ht) {
+    unsigned int i;
+    Block_hashtab_entry *entry;
+
+    if (ht == NULL) {
+        return;
+	}
+
+    // iterate through ht's table array
+    for (i = 0; i < ht->size; i++) {
+        entry = ht->table[i];
+        // iterate through linked list in table[i] starting w/ head
+        while (entry != NULL) {
+			printf("block %lu - %lu: executed %lu times\n",
+			        entry->start_addr, entry->end_addr, entry->exec_count);
+			//###################################
+			//printf("edges \n");
+            entry = entry->next;
+        }
+    }
 }
 
 unsigned int hash(unsigned long addr, unsigned int ht_size) {
