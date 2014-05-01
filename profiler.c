@@ -48,11 +48,11 @@ typedef struct jump_hashtab {
 unsigned int hash(unsigned long, unsigned int); //###### int or long? #####
 Block_hashtab *create_block_hashtab(unsigned int);
 Block_hashtab_entry *lookup_block(unsigned long, Block_hashtab *);
-Block_hashtab_entry *update_block(unsigned long, Block_hashtab *);
+Block_hashtab_entry *get_block(unsigned long, Block_hashtab *);
 void free_block_hashtab(Block_hashtab *);
 Jump_hashtab *create_jump_hashtab(unsigned int);
 Jump_hashtab_entry *lookup_jump(unsigned long, Jump_hashtab *);
-Jump_hashtab_entry *update_jump(unsigned long, Jump_hashtab *);
+Jump_hashtab_entry *get_jump(unsigned long, Jump_hashtab *);
 void free_jump_hashtab(Jump_hashtab *);
 
 void usage(char *);
@@ -63,8 +63,7 @@ int main(int argc, char *argv[]) {
 		exit(1);
 	}
 	
-	// local main() variables
-    FILE *ifp;                         // input file pointer
+    FILE *ifp; // input file pointer
 	char line[MAXLINE];
     char *token;
 	//#######################
@@ -79,6 +78,11 @@ int main(int argc, char *argv[]) {
 	Boolean prev_addr_end_SBB = FALSE; // must prev_addr end its SBB?
 	Boolean prev_addr_end_DBB = FALSE; // must prev_addr end its DBB?
 	Boolean fall_thru = FALSE; // was prev_addr a conditional branch not taken?
+	Block_hashtab *SBB_ht = NULL;
+	Block_hashtab *DBB_ht = NULL;
+	Block_hashtab_entry *block = NULL;
+	Jump_hashtab *jump_ht = NULL;
+	//Jump_hashtab_entry *jump = NULL;
     
 	// open specified input file; check if successful
     ifp = fopen(argv[1], "r");
@@ -88,17 +92,17 @@ int main(int argc, char *argv[]) {
     }
 
 	// create hash tables; check is successful
-	Block_hashtab *SBB_ht = create_block_hashtab(HASHSIZE);
+	SBB_ht = create_block_hashtab(HASHSIZE);
 	if (SBB_ht == NULL) {
         perror("malloc failure in create_block_hashtab()");
 		exit(1);
 	}
-	Block_hashtab *DBB_ht = create_block_hashtab(HASHSIZE);
+	DBB_ht = create_block_hashtab(HASHSIZE);
 	if (DBB_ht == NULL) {
         perror("malloc failure in create_block_hashtab()");
 		exit(1);
 	}
-	Jump_hashtab *jump_ht = create_jump_hashtab(HASHSIZE);
+	jump_ht = create_jump_hashtab(HASHSIZE);
 	if (jump_ht == NULL) {
         perror("malloc failure in create_jump_hashtab()");
 		exit(1);
@@ -136,31 +140,90 @@ int main(int argc, char *argv[]) {
 			prev_addr_end_SBB = TRUE;
 			prev_addr_end_DBB = TRUE;
 			fall_thru = FALSE;
+			// add prev_addr to list of jump instructions
+			// won't re-add if already there; will just return pointer
+			get_jump(prev_addr, jump_ht); // disregard return
 		}
-		/*
 		else { // if contig == TRUE
-			
-			if ( *** prev_addr in jump table *** ) {
-				prev_addr_end_SBB = TRUE
-				prev_addr_end_DBB = TRUE
-				fall_thru = TRUE
+			if (lookup_jump(prev_addr, jump_ht) != NULL) {
+				prev_addr_end_SBB = TRUE;
+				prev_addr_end_DBB = TRUE;
+				fall_thru = TRUE;
 			}
-			else if ( *** curr_addr in target_table *** ) {
-				prev_addr_end_SBB = TRUE
-				prev_addr_end_DBB = FALSE // only if prev was jump
-				fall_thru = FALSE
+			else if ( lookup_block(curr_addr, SBB_ht) != NULL ) {
+				prev_addr_end_SBB = TRUE;
+				prev_addr_end_DBB = FALSE; // only if prev was jump
+				fall_thru = FALSE;
 			}
 			else // prev_addr not jump, curr_addr not target
 				prev_addr_end_SBB = FALSE;
 				prev_addr_end_DBB = FALSE;
 				fall_thru = FALSE;
 		}
-		*/
+	
+		if (prev_addr_end_SBB) {
+			// deal with prev_addr as a block ender
+			block = get_block(curr_SBB_start_addr, SBB_ht);
+			if (block == NULL) {
+				perror("malloc failure in get_block()");
+				exit(1);
+			}
+			if (block->end_addr != 0 && block->end_addr != prev_addr) {
+				//###################
+				printf("Need to split SBB %lu\n", block->start_addr);
+			}
+			else {
+				block->end_addr = prev_addr;
+				printf("SBB %lu ends with %lu\n",
+						block->start_addr, block->end_addr);
+			}
 
-			
+			// deal with curr_addr as a block starter
+			block = get_block(curr_addr, SBB_ht);
+			if (block == NULL) {
+				perror("malloc failure in get_block()");
+				exit(1);
+			}
+			block->exec_count += 1;
+
+			// reset curr_SBB_start_addr
+			curr_SBB_start_addr = curr_addr;
+		}
+
+		if (prev_addr_end_DBB) {
+			// deal with prev_addr as a block ender
+			block = get_block(curr_DBB_start_addr, DBB_ht);
+			if (block == NULL) {
+				perror("malloc failure in get_block()");
+				exit(1);
+			}
+			if (block->end_addr != 0) {
+				//###################
+				printf("Need to split DBB %lu\n", block->start_addr);
+			}
+			else {
+				block->end_addr = prev_addr;
+				printf("DBB %lu ends with %lu\n",
+						block->start_addr, block->end_addr);
+			}
+
+			// deal with curr_addr as a block starter
+			block = get_block(curr_addr, DBB_ht);
+			if (block == NULL) {
+				perror("malloc failure in get_block()");
+				exit(1);
+			}
+			block->exec_count += 1;
+
+			// reset curr_DBB_start_addr
+			curr_DBB_start_addr = curr_addr;
+		}
 
 		//#######################################
 		printf("contig = %d\n", contig);
+		printf("prev_end_SBB = %d\n", prev_addr_end_SBB);
+		printf("prev_end_DBB = %d\n", prev_addr_end_DBB);
+		printf("fall_thru = %d\n", fall_thru);
 		
 		//#################################################
 		if (line_num > 20) break; // testing only - stop after x lines
@@ -250,8 +313,17 @@ Block_hashtab_entry *get_block(unsigned long addr, Block_hashtab *ht) {
         entry->next = ht->table[hashval];
         ht->table[hashval] = entry;
 
-		// populate start_addr
+		// initialize fields
 		entry->start_addr = addr;
+		entry->end_addr = 0;
+		entry->exec_count = 0;
+		entry->fall_thru_addr = 0;
+		entry->fall_thru_count = 0;
+		entry->target_1_addr = 0;
+		entry->target_1_count = 0;
+		entry->target_2_addr = 0;
+		entry->target_2_count = 0;
+		entry->next = NULL;
     }
     return entry;
 }

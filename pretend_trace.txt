@@ -1,0 +1,15 @@
+==30858== Lackey, an example Valgrind tool
+==30858== Copyright (C) 2002-2011, and GNU GPL'd, by Nicholas Nethercote.
+==30858== Using Valgrind-3.7.0 and LibVEX; rerun with -h for copyright info
+==30858== Command: ./test1
+==30858== 
+I  00000001,3
+I  00000004,5
+I  00000009,1
+I  000000b0,3
+I  000000b3,2
+I  000000b5,2
+I  00000001,3
+I  00000004,5
+I  00000009,1
+I  0000000a,4
