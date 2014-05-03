@@ -72,7 +72,8 @@ void usage(char *);
 void add_to_linked_list(Instruction, Instruction, Block_hashtab *);
 void update_block_end(Instruction, Instruction, Block_hashtab *);
 Block_hashtab_entry *get_block_containing_inst(Instruction, Block_hashtab *);
-void split_block(Instruction, Instruction, Instruction, Block_hashtab *);
+void split_block(Instruction, Instruction, Instruction, Boolean,
+                 Block_hashtab *);
 void update_block_start(Instruction, Block_hashtab *);
 void update_target_count(Instruction, Instruction, Block_hashtab *);
 void print_block_profile(char *, Block_hashtab *);
@@ -170,7 +171,7 @@ int main(int argc, char *argv[]) {
 		curr_inst.len = strtoul(strtok(NULL, " ,"), NULL, 10);  // decimal
 
 		//###########################################
-		printf("\n%lu, %lu\n", curr_inst.addr, curr_inst.len);
+		printf("\n%0#lx, %lu\n", curr_inst.addr, curr_inst.len);
 		
 		// test if jump just occured from prev_inst to curr_inst
 		contig = ((prev_inst.addr + prev_inst.len) == curr_inst.addr);
@@ -203,8 +204,7 @@ int main(int argc, char *argv[]) {
 	
 		//#######################################
 		printf("contig = %d\n", contig);
-		printf("prev_end_SBB = %d\n", prev_addr_end_SBB);
-		printf("prev_end_DBB = %d\n", prev_addr_end_DBB);
+		printf("--- prev_end_SBB = %d\n", prev_addr_end_SBB);
 		
 		if (prev_addr_end_SBB) {
 			update_block_end(curr_SBB_start_inst, prev_inst, SBB_ht);
@@ -213,6 +213,8 @@ int main(int argc, char *argv[]) {
 			curr_SBB_start_inst = curr_inst;
 		}
 
+		//#######################################
+		printf("--- prev_end_DBB = %d\n", prev_addr_end_DBB);
 		if (prev_addr_end_DBB) {
 			update_block_end(curr_DBB_start_inst, prev_inst, DBB_ht);
 			update_block_start(curr_inst, DBB_ht);
@@ -281,6 +283,7 @@ void update_block_end(Instruction start, Instruction end, Block_hashtab *ht) {
 
 	Block_hashtab_entry *containing_block;
 	Block_hashtab_entry *current_block;
+	Boolean subtract_one = FALSE;
 
 	// test if "end" falls in the middle of any existing blocks
 	containing_block = get_block_containing_inst(end, ht);
@@ -291,8 +294,15 @@ void update_block_end(Instruction start, Instruction end, Block_hashtab *ht) {
 		new_block_start.len = 0;
 		// usage:
 		// split_block(orig_block_start, orig_block_new_end,
-		//             new_block_start, ht)
-		split_block(containing_block->start_inst, end, new_block_start, ht);
+		//             new_block_start, subtract_one, ht)
+		// subtract_one is TRUE if calling from update_block_end()
+		//     and start.addr == containing_block->start_inst.addr
+		// else subtract_one = FALSE
+		subtract_one = (start.addr == containing_block->start_inst.addr);
+		split_block(containing_block->start_inst, end, new_block_start,
+		            subtract_one, ht);
+		//###################################
+		printf("split for new end\n");
 
 		// check if there is another containing_block
 		containing_block = get_block_containing_inst(end, ht);
@@ -312,7 +322,7 @@ void update_block_end(Instruction start, Instruction end, Block_hashtab *ht) {
 		current_block->end_inst = end;
 		current_block->fall_thru_inst.addr = end.addr + end.len;
 		//################################
-		printf("block %lu ends with %lu\n",
+		printf("block %0#lx ends with %0#lx\n",
 		        current_block->start_inst.addr,
 		        current_block->end_inst.addr);
 	}
@@ -347,7 +357,8 @@ Block_hashtab_entry *get_block_containing_inst(Instruction inst,
 }
 
 void split_block(Instruction orig_block_start, Instruction orig_block_new_end,
-                 Instruction new_block_start, Block_hashtab *ht) {
+                 Instruction new_block_start, Boolean subtract_one,
+                 Block_hashtab *ht) {
 	//###############################################
 	printf("split_block()\n");
 
@@ -359,16 +370,31 @@ void split_block(Instruction orig_block_start, Instruction orig_block_new_end,
 	// update new block
 	new_block->end_inst = orig_block->end_inst;
 	new_block->fall_thru_inst = orig_block->fall_thru_inst;
-	new_block->exec_count = orig_block->exec_count - 1;
+	if (subtract_one) {
+		// if split_block() called by update_block_end()
+		// and the current block's start addr at the time
+		// equals the containing block's start addr,
+		// then the new block ran 1 less time than original
+		new_block->exec_count = orig_block->exec_count - 1;
+	}
+	else {
+		// if split_block() called by update_block_start()
+		// or if the current block's start addr when called
+		// from update_block_end() != the containing block's start addr,
+		// then these counts should be equal
+		new_block->exec_count = orig_block->exec_count;
+	}
 	new_block->fall_thru_count = orig_block->fall_thru_count;
 	new_block->target_list_head = orig_block->target_list_head;
 
 	// update original block
 	orig_block->end_inst = orig_block_new_end;
 	orig_block->fall_thru_inst = new_block_start;
-	// this split is only needed if this branch "fell through"
-	// every time until now, so fall_thru_count = exec_count - 1
-	orig_block->fall_thru_count = orig_block->exec_count - 1;
+	// original fell through every time until now
+	orig_block->fall_thru_count = new_block->exec_count;
+	//################################
+	printf(">>> block %0#lx ft_cnt: %lu\n", orig_block->start_inst.addr,
+			orig_block->fall_thru_count);
 	orig_block->target_list_head = NULL;
 
 	// split orig_block's Instruction linked list with new_block
@@ -418,12 +444,14 @@ void update_block_start(Instruction start, Block_hashtab *ht) {
 			}
 			// usage:
 			// split_block(orig_block_start, orig_block_new_end,
-			//             new_block_start, ht)
+			//             new_block_start, subtract_one, ht)
+			// subtract_one is TRUE if calling from update_block_end()
+			//     and start.addr == containing_block->start_inst.addr
+			// else subtract_one = FALSE
 			split_block(containing_block->start_inst,
-			                      orig_block_new_end, start, ht);
-			// split_block() sets new.exec_count = old.exec_count - 1
-			// but in this case (new start) they should be equal, so add 1
-			extra = 1; // will be added in below (0 if split_block not run)
+			                      orig_block_new_end, start, FALSE, ht);
+			//######################################3
+			printf("split for new start\n");
 
 			// check if there is another containing_block
 			containing_block = get_block_containing_inst(start, ht);
@@ -436,12 +464,19 @@ void update_block_start(Instruction start, Block_hashtab *ht) {
 		perror("malloc failure in get_block()");
 		exit(1);
 	}
-	current_block->exec_count += (1 + extra);
+	current_block->exec_count += 1;
+	//#############################
+	if (extra > 0) {
+		printf("adding extra %lu\n", extra);
+	}
 }
 
 void update_target_count(Instruction start, Instruction target,
                          Block_hashtab *ht) {
-	Block_hashtab_entry *block = get_block(start, ht);
+	Block_hashtab_entry *block;
+    if ((block = get_block(start, ht)) == NULL) {
+		return;
+	}
 	
 	// if the target is the block's fall_thru_inst, increment & return
 	if (target.addr == block->fall_thru_inst.addr) {
@@ -470,9 +505,12 @@ void update_target_count(Instruction start, Instruction target,
 void print_block_profile(char *output_filename_prefix, Block_hashtab *ht) {
     FILE *ofp;
 	char *output_filename;
-    unsigned int i;
+    unsigned int i = 0;
     Block_hashtab_entry *entry;
-	Target_list_entry *list;
+	Block_hashtab_entry *target_block;
+	Inst_list_entry *inst_list;
+	Target_list_entry *target_list;
+	unsigned long inst_count = 0;
 
     if (ht == NULL) {
         return;
@@ -497,6 +535,23 @@ void print_block_profile(char *output_filename_prefix, Block_hashtab *ht) {
 
 	free(output_filename);
 
+	// write "header" info to output file
+	if (ht->block_type == STATIC) {
+		fprintf(ofp, "STATIC Basic Block Profile\n\n");
+	}
+	else {
+		fprintf(ofp, "DYNAMIC Basic Block Profile\n\n");
+	}
+
+	// write block profile to output file
+	fprintf(ofp, "Block profile:\n"
+	             "ID      = unique block identifier number\n"
+	             "start   = address of block's starting instruction\n"
+				 "#I      = number of instructions in the block\n"
+	             "end     = address of block's ending instruction\n"
+				 "#E      = number of times the block was executed\n"
+				 "[edges] = list of outgoing edge targets by block ID\n"
+				 "\nID: start #I end #E [edges]\n");
     // iterate through ht's table array
     for (i = 0; i < ht->size; i++) {
         entry = ht->table[i];
@@ -504,24 +559,40 @@ void print_block_profile(char *output_filename_prefix, Block_hashtab *ht) {
         while (entry != NULL) {
 			if (entry->start_inst.addr != 0) {
 				// first instruction is "jump" from initialized zeros; ignore
-
-				//###################################
-				printf("block %lu: %0#lx - %0#lx, exec %lu\n",
-						entry->block_id, entry->start_inst.addr,
-				        entry->end_inst.addr, entry->exec_count);
-
-				printf("    fall-thru %0#lx %lu\n",
-				       entry->fall_thru_inst.addr,
-					   entry->fall_thru_count);
 				
-				list = entry->target_list_head;
-				while (list != NULL) {
-					printf("         jump %0#lx %lu\n",
-					       list->inst.addr, list->count);
-					list = list->next;
+				inst_list = entry->inst_list_head;
+				inst_count = 0;
+				while (inst_list != NULL) {
+					inst_count++;
+					inst_list = inst_list->next;
 				}
-				//###################################
-				//printf("edges \n");
+
+				fprintf(ofp, "%lu: %0#lx %lu %0#lx %lu [ ",
+				        entry->block_id, entry->start_inst.addr,
+				        inst_count, entry->end_inst.addr,
+				        entry->exec_count);
+				//################################
+				printf("block: %0#lx, %lu\n", entry->start_inst.addr,
+						entry->exec_count);
+
+				if (entry->fall_thru_count > 0) {
+					target_block = get_block(entry->fall_thru_inst, ht);
+					fprintf(ofp, "%lu ", target_block->block_id); 
+				}
+				//################################
+				printf("    ft: %0#lx, %lu\n",
+						entry->fall_thru_inst.addr, entry->fall_thru_count);
+
+				target_list = entry->target_list_head;
+				while (target_list != NULL) {
+					target_block = get_block(target_list->inst, ht);
+					fprintf(ofp, "%lu ", target_block->block_id);
+					//################################
+					printf("    t: %0#lx, %lu\n",
+							target_list->inst.addr, target_list->count);
+					target_list = target_list->next;
+				}
+				fprintf(ofp, "]\n");
 			}
 			entry = entry->next;
         }
