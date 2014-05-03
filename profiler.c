@@ -36,6 +36,7 @@ typedef struct block_hashtab_entry {
 	Instruction fall_thru_inst;
 	Instruction target_1_inst;
 	Instruction target_2_inst;
+	unsigned long block_id;
 	unsigned long exec_count;
 	unsigned long fall_thru_count;
 	unsigned long target_1_count;
@@ -48,6 +49,7 @@ typedef struct block_hashtab_entry {
 typedef struct block_hashtab {
 	unsigned int size;
 	BB_Type block_type;
+	unsigned long block_id_counter;
 	Block_hashtab_entry **table;
 	// after allocation, use as "Block_hashtab_entry *table[size]"
 } Block_hashtab;
@@ -201,8 +203,8 @@ int main(int argc, char *argv[]) {
 	
 		//#######################################
 		printf("contig = %d\n", contig);
-		//printf("prev_end_SBB = %d\n", prev_addr_end_SBB);
-		//printf("prev_end_DBB = %d\n", prev_addr_end_DBB);
+		printf("prev_end_SBB = %d\n", prev_addr_end_SBB);
+		printf("prev_end_DBB = %d\n", prev_addr_end_DBB);
 		//printf("fall_thru = %d\n", fall_thru);
 		
 		if (prev_addr_end_SBB) {
@@ -453,13 +455,13 @@ void print_block_profile(Block_hashtab *ht) {
 				// first instruction is "jump" from initialized zeros; ignore
 
 				//###################################
-				printf("block %lu - %lu: executed %lu time(s)\n",
-						entry->start_inst.addr, entry->end_inst.addr,
-				        entry->exec_count);
+				printf("block %lu: %0#lx - %0#lx, executed %lu time(s)\n",
+						entry->block_id, entry->start_inst.addr,
+				        entry->end_inst.addr, entry->exec_count);
 				
 				list = entry->inst_list_head;
 				while (list != NULL) {
-					printf("I %lu\n", list->inst.addr);
+					//printf("I %lu\n", list->inst.addr);
 					list = list->next;
 				}
 				//###################################
@@ -507,6 +509,7 @@ Block_hashtab *create_block_hashtab(unsigned int size, BB_Type block_type) {
     // set size & type and return
     ht->size = size;
 	ht->block_type = block_type;
+	ht->block_id_counter = 0;
     return ht;
 }
 
@@ -551,6 +554,8 @@ Block_hashtab_entry *get_block(Instruction inst, Block_hashtab *ht) {
 		entry->target_2_inst.addr = 0;
 		entry->target_2_inst.len = 0;
 
+		entry->block_id = ht->block_id_counter; // give block its ID
+		ht->block_id_counter += 1; // get ID for next new block
 		entry->exec_count = 0;
 		entry->fall_thru_count = 0;
 		entry->target_1_count = 0;
@@ -561,7 +566,18 @@ Block_hashtab_entry *get_block(Instruction inst, Block_hashtab *ht) {
 		}
 		entry->inst_list_tail = entry->inst_list_head;
     }
-	// ###############3 update start_inst.len if necessary ##############
+	// update start_inst.len if necessary (if start_inst was set
+	// by split_block() then start_inst.len may not be populated)
+	if (entry->start_inst.len == 0) {
+		Inst_list_entry *list = entry->inst_list_head;
+		while (list != NULL) {
+			if (list->inst.addr == entry->start_inst.addr) {
+				entry->start_inst.len = list->inst.len;
+				break;
+			}
+			list = list->next;
+		}
+	}
     return entry;
 }
 

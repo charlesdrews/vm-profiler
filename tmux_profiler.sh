@@ -11,22 +11,22 @@ then
 
 	# set up pane 0:2 with git live log
 	tmux select-pane -t profiler:0.2
-	tmux send-keys -t profiler:0.2 'export COLUMNS' C-m
+	tmux send-keys -t profiler:0.2 'export COLUMNS LINES' C-m
 	tmux send-keys -t profiler:0.2 \
-		'cd ~/Dropbox/Charlie/NYU/2014_Spring/VMs/project/phase3/' \
-		C-m
+		'cd ~/Dropbox/Charlie/NYU/2014_Spring/VMs/project/phase3/' C-m
 	tmux send-keys -t profiler:0.2 \
 		'~/Dropbox/Charlie/Scripts/git_live_log.sh' C-m
 
 	# set up pane 0:0 with command line
 	tmux select-pane -t profiler:0.0
 	tmux send-keys -t profiler:0.0 \
-		'cd ~/Dropbox/Charlie/NYU/2014_Spring/VMs/project/phase3/' \
-		C-m
+		'cd ~/Dropbox/Charlie/NYU/2014_Spring/VMs/project/phase3/' C-m
 	tmux send-keys -t profiler:0.0 'ls -ACF --color=auto' C-m
 
 	# set up pane 0:1 with 
 	tmux select-pane -t profiler:0.1
+	tmux send-keys -t profiler:0.1 \
+		'cd ~/Dropbox/Charlie/NYU/2014_Spring/VMs/project/phase3/' C-m
 	tmux send-keys -t profiler:0.1 'vim profiler.c' C-m
 fi
 tmux attach -t profiler # re-attach
