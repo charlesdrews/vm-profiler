@@ -68,6 +68,15 @@ typedef struct jump_hashtab {
 	// after allocation, use as "Jump_hashtab_entry *table[size]"
 } Jump_hashtab;
 
+void usage(char *);
+void add_to_linked_list(Instruction, Instruction, Block_hashtab *);
+void update_block_end(Instruction, Instruction, Block_hashtab *);
+Block_hashtab_entry *get_block_containing_inst(Instruction, Block_hashtab *);
+void split_block(Instruction, Instruction, Instruction, Block_hashtab *);
+void update_block_start(Instruction, Block_hashtab *);
+void update_target_count(Instruction, Instruction, Block_hashtab *);
+void print_block_profile(char *, Block_hashtab *);
+
 unsigned int hash(Instruction, unsigned int);
 Block_hashtab *create_block_hashtab(unsigned int, BB_Type);
 Block_hashtab_entry *lookup_block(Instruction, Block_hashtab *);
@@ -83,15 +92,6 @@ Jump_hashtab *create_jump_hashtab(unsigned int);
 Jump_hashtab_entry *lookup_jump(Instruction, Jump_hashtab *);
 Jump_hashtab_entry *get_jump(Instruction, Jump_hashtab *);
 void free_jump_hashtab(Jump_hashtab *);
-
-void usage(char *);
-void add_to_linked_list(Instruction, Instruction, Block_hashtab *);
-void update_block_end(Instruction, Instruction, Block_hashtab *);
-Block_hashtab_entry *get_block_containing_inst(Instruction, Block_hashtab *);
-void split_block(Instruction, Instruction, Instruction, Block_hashtab *);
-void update_block_start(Instruction, Block_hashtab *);
-void update_target_count(Instruction, Instruction, Block_hashtab *);
-void print_block_profile(Block_hashtab *);
 
 int main(int argc, char *argv[]) {
 	if (argc != 2) {
@@ -235,10 +235,11 @@ int main(int argc, char *argv[]) {
 	update_block_end(curr_DBB_start_inst, curr_inst, DBB_ht);
 	
 	// output
+	char *output_filename_prefix = strtok(argv[1], ".");
 	printf("\nSBB block profile:\n");
-	print_block_profile(SBB_ht);
+	print_block_profile(output_filename_prefix, SBB_ht);
 	printf("\nDBB block profile:\n");
-	print_block_profile(DBB_ht);
+	print_block_profile(output_filename_prefix, DBB_ht);
 
 	// wrap it up
 	free_block_hashtab(SBB_ht);
@@ -466,7 +467,9 @@ void update_target_count(Instruction start, Instruction target,
 	return;
 }
 
-void print_block_profile(Block_hashtab *ht) {
+void print_block_profile(char *output_filename_prefix, Block_hashtab *ht) {
+    FILE *ofp;
+	char *output_filename;
     unsigned int i;
     Block_hashtab_entry *entry;
 	Target_list_entry *list;
@@ -474,6 +477,25 @@ void print_block_profile(Block_hashtab *ht) {
     if (ht == NULL) {
         return;
 	}
+
+	output_filename = malloc(strlen(output_filename_prefix) + \
+	                         strlen("_XBB_profile.txt") + 1);
+	strcpy(output_filename, output_filename_prefix);
+
+	if (ht->block_type == STATIC) {
+    	strcat(output_filename, "_SBB_profile.txt");
+	}
+	else {
+    	strcat(output_filename, "_DBB_profile.txt");
+	}
+	
+	ofp = fopen(output_filename, "w");
+    if (ofp == NULL) {
+        perror("Error");
+        exit(1);
+    }
+
+	free(output_filename);
 
     // iterate through ht's table array
     for (i = 0; i < ht->size; i++) {
@@ -504,6 +526,8 @@ void print_block_profile(Block_hashtab *ht) {
 			entry = entry->next;
         }
     }
+	
+	fclose(ofp);
 }
 
 /*************************************************************************
