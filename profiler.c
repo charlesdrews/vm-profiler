@@ -30,6 +30,12 @@ typedef struct instruction_list_entry {
 	struct instruction_list_entry *next;
 } Inst_list_entry;
 
+typedef struct target_list_entry {
+	Instruction inst;
+	unsigned long count;
+	struct target_list_entry *next;
+} Target_list_entry;
+
 typedef struct block_hashtab_entry {
 	Instruction start_inst;
 	Instruction end_inst;
@@ -43,6 +49,7 @@ typedef struct block_hashtab_entry {
 	unsigned long target_2_count;
 	Inst_list_entry *inst_list_head;
 	Inst_list_entry *inst_list_tail;
+	Target_list_entry *target_list_head;
 	struct block_hashtab_entry *next;
 } Block_hashtab_entry;
 
@@ -65,7 +72,7 @@ typedef struct jump_hashtab {
 	// after allocation, use as "Jump_hashtab_entry *table[size]"
 } Jump_hashtab;
 
-unsigned int hash(Instruction, unsigned int); //###### int or long? #####
+unsigned int hash(Instruction, unsigned int);
 Block_hashtab *create_block_hashtab(unsigned int, BB_Type);
 Block_hashtab_entry *lookup_block(Instruction, Block_hashtab *);
 Block_hashtab_entry *get_block(Instruction, Block_hashtab *);
@@ -73,6 +80,8 @@ void free_block_hashtab(Block_hashtab *);
 
 Inst_list_entry *create_inst_list_entry(Instruction);
 void free_inst_list(Inst_list_entry *);
+Target_list_entry *create_target_list_entry(Instruction);
+void free_target_list(Target_list_entry *);
 
 Jump_hashtab *create_jump_hashtab(unsigned int);
 Jump_hashtab_entry *lookup_jump(Instruction, Jump_hashtab *);
@@ -85,6 +94,8 @@ void update_block_end(Instruction, Instruction, Block_hashtab *);
 Block_hashtab_entry *get_block_containing_inst(Instruction, Block_hashtab *);
 void split_block(Instruction, Instruction, Instruction, Block_hashtab *);
 void update_block_start(Instruction, Block_hashtab *);
+void update_target_count(Instruction, Instruction,
+                         Instruction, Block_hashtab *);
 void print_block_profile(Block_hashtab *);
 
 int main(int argc, char *argv[]) {
@@ -210,15 +221,21 @@ int main(int argc, char *argv[]) {
 		if (prev_addr_end_SBB) {
 			update_block_end(curr_SBB_start_inst, prev_inst, SBB_ht);
 			update_block_start(curr_inst, SBB_ht);
+			update_target_count(curr_SBB_start_inst, prev_inst,
+			                    curr_inst, SBB_ht);
 			curr_SBB_start_inst = curr_inst;
 		}
 
 		if (prev_addr_end_DBB) {
 			update_block_end(curr_DBB_start_inst, prev_inst, DBB_ht);
 			update_block_start(curr_inst, DBB_ht);
+			update_target_count(curr_DBB_start_inst, prev_inst,
+			                    curr_inst, DBB_ht);
 			curr_DBB_start_inst = curr_inst;
 		}
-
+		
+		// append curr_inst to block entries' list of instructions
+		// (will not re-add if seen before and already in list)
 		add_to_linked_list(curr_SBB_start_inst, curr_inst, SBB_ht);
 		add_to_linked_list(curr_DBB_start_inst, curr_inst, DBB_ht);
 
@@ -356,12 +373,15 @@ void split_block(Instruction orig_block_start, Instruction orig_block_new_end,
 	new_block->target_1_count = orig_block->target_1_count;
 	new_block->target_2_count = orig_block->target_2_count;
 
+	new_block->target_list_head = orig_block->target_list_head;
+
 	// update original block
 	orig_block->end_inst = orig_block_new_end;
 	orig_block->fall_thru_inst = new_block_start;
 	// this split is only needed if this branch "fell through"
 	// every time until now, so fall_thru_count = exec_count - 1
 	orig_block->fall_thru_count = orig_block->exec_count - 1;
+	orig_block->target_list_head = NULL;
 	orig_block->target_1_inst.addr = 0;
 	orig_block->target_1_inst.len = 0;
 	orig_block->target_1_count = 0;
@@ -437,10 +457,38 @@ void update_block_start(Instruction start, Block_hashtab *ht) {
 	current_block->exec_count += (1 + extra);
 }
 
+void update_target_count(Instruction start, Instruction jump,
+                         Instruction target, Block_hashtab *ht) {
+	Block_hashtab_entry *block = get_block(start, ht);
+	
+	// if the target is the block's fall_thru_inst, increment & return
+	if (target.addr == block->fall_thru_inst.addr) {
+		block->fall_thru_count += 1;
+		return;
+	}
+
+	// otherwise find target in the target list, incrmement count & return
+	Target_list_entry *list = block->target_list_head;
+	while (list != NULL) {
+		if (list->inst.addr == target.addr) {
+			list->count += 1;
+			return;
+		}
+		list = list->next;
+	}
+
+	// else if not fall_thru and not in target list, add entry & return
+	list = create_target_list_entry(target);
+	list->next = block->target_list_head;
+	block->target_list_head = list; // position new entry at head
+	list->count += 1;
+	return;
+}
+
 void print_block_profile(Block_hashtab *ht) {
     unsigned int i;
     Block_hashtab_entry *entry;
-	Inst_list_entry *list;
+	Target_list_entry *list;
 
     if (ht == NULL) {
         return;
@@ -455,13 +503,18 @@ void print_block_profile(Block_hashtab *ht) {
 				// first instruction is "jump" from initialized zeros; ignore
 
 				//###################################
-				printf("block %lu: %0#lx - %0#lx, executed %lu time(s)\n",
+				printf("block %lu: %0#lx - %0#lx, exec %lu\n",
 						entry->block_id, entry->start_inst.addr,
 				        entry->end_inst.addr, entry->exec_count);
+
+				printf("    fall-thru %0#lx %lu\n",
+				       entry->fall_thru_inst.addr,
+					   entry->fall_thru_count);
 				
-				list = entry->inst_list_head;
+				list = entry->target_list_head;
 				while (list != NULL) {
-					//printf("I %lu\n", list->inst.addr);
+					printf("         jump %0#lx %lu\n",
+					       list->inst.addr, list->count);
 					list = list->next;
 				}
 				//###################################
@@ -560,6 +613,7 @@ Block_hashtab_entry *get_block(Instruction inst, Block_hashtab *ht) {
 		entry->fall_thru_count = 0;
 		entry->target_1_count = 0;
 		entry->target_2_count = 0;
+		entry->target_list_head = NULL;
 
 		if ((entry->inst_list_head = create_inst_list_entry(inst)) == NULL) {
 			return NULL;
@@ -598,6 +652,7 @@ void free_block_hashtab(Block_hashtab *ht) {
             temp = entry;
             entry = entry->next;
 			free_inst_list(temp->inst_list_head);
+			free_target_list(temp->target_list_head);
             free(temp); // free that node
         }
     }
@@ -622,6 +677,29 @@ Inst_list_entry *create_inst_list_entry(Instruction inst) {
 
 void free_inst_list(Inst_list_entry *head) {
 	Inst_list_entry *temp;
+	while (head != NULL) {
+		temp = head;
+		head = head->next;
+		free(temp); // free that node
+	}
+}
+
+Target_list_entry *create_target_list_entry(Instruction inst) {
+	// attempt to allocate memory for Inst_list_entry struct
+	Target_list_entry *entry;
+	if ((entry = malloc(sizeof(Target_list_entry))) == NULL) {
+		return NULL;
+	}
+
+	entry->inst.addr = inst.addr;
+	entry->inst.len = inst.len;
+	entry->count = 0;
+	entry->next = NULL;
+	return entry;
+}
+
+void free_target_list(Target_list_entry *head) {
+	Target_list_entry *temp;
 	while (head != NULL) {
 		temp = head;
 		head = head->next;
