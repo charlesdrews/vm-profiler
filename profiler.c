@@ -511,6 +511,7 @@ void print_block_profile(char *output_filename_prefix, Block_hashtab *ht) {
 	Inst_list_entry *inst_list;
 	Target_list_entry *target_list;
 	unsigned long inst_count = 0;
+	unsigned long target_count = 0;
 
     if (ht == NULL) {
         return;
@@ -537,14 +538,15 @@ void print_block_profile(char *output_filename_prefix, Block_hashtab *ht) {
 
 	// write "header" info to output file
 	if (ht->block_type == STATIC) {
-		fprintf(ofp, "STATIC Basic Block Profile\n\n");
+		fprintf(ofp, "STATIC Basic Block Profile\n");
 	}
 	else {
-		fprintf(ofp, "DYNAMIC Basic Block Profile\n\n");
+		fprintf(ofp, "DYNAMIC Basic Block Profile\n");
 	}
 
 	// write block profile to output file
-	fprintf(ofp, "Block profile:\n"
+	fprintf(ofp, "\n--------------------------------------------------\n"
+	             "Block profile:\n"
 	             "ID      = unique block identifier number\n"
 	             "start   = address of block's starting instruction\n"
 				 "#I      = number of instructions in the block\n"
@@ -571,28 +573,86 @@ void print_block_profile(char *output_filename_prefix, Block_hashtab *ht) {
 				        entry->block_id, entry->start_inst.addr,
 				        inst_count, entry->end_inst.addr,
 				        entry->exec_count);
-				//################################
-				printf("block: %0#lx, %lu\n", entry->start_inst.addr,
-						entry->exec_count);
 
 				if (entry->fall_thru_count > 0) {
 					target_block = get_block(entry->fall_thru_inst, ht);
 					fprintf(ofp, "%lu ", target_block->block_id); 
 				}
-				//################################
-				printf("    ft: %0#lx, %lu\n",
-						entry->fall_thru_inst.addr, entry->fall_thru_count);
 
 				target_list = entry->target_list_head;
 				while (target_list != NULL) {
 					target_block = get_block(target_list->inst, ht);
 					fprintf(ofp, "%lu ", target_block->block_id);
-					//################################
-					printf("    t: %0#lx, %lu\n",
-							target_list->inst.addr, target_list->count);
 					target_list = target_list->next;
 				}
 				fprintf(ofp, "]\n");
+			}
+			entry = entry->next;
+        }
+    }
+	
+	// write edge profile to output file
+	fprintf(ofp, "\n--------------------------------------------------\n"
+	             "Edge profile:\n"
+	             "ID       = unique block identifier number\n"
+				 "[TID:#E] = list of this block's outgoing edges\n"
+				 "TID      = Target ID, the ID of each edge's target block\n"
+				 "#E       = number of times each edge was taken\n"
+	             "desc     = description of this block's ending instruction:\n"
+				 "               - NB = Not a Branch (falls-thru every time)\n"
+				 "               - CB = Conditional Branch\n"
+				 "               - UB = Unconditional Branch\n"
+				 "               - IJ = Indirect Jump (multiple targets)\n"
+				 "\nID: [ TID:#E ] desc\n");
+    // iterate through ht's table array
+    for (i = 0; i < ht->size; i++) {
+        entry = ht->table[i];
+        // iterate through linked list in table[i] starting w/ head
+        while (entry != NULL) {
+			if (entry->start_inst.addr != 0) {
+				// first instruction is "jump" from initialized zeros; ignore
+				
+				inst_list = entry->inst_list_head;
+				inst_count = 0;
+				while (inst_list != NULL) {
+					inst_count++;
+					inst_list = inst_list->next;
+				}
+
+				fprintf(ofp, "%lu: [ ", entry->block_id);
+
+				if (entry->fall_thru_count > 0) {
+					target_block = get_block(entry->fall_thru_inst, ht);
+					fprintf(ofp, "%lu:%lu ", target_block->block_id,
+					        entry->fall_thru_count); 
+				}
+
+				target_count = 0;
+				target_list = entry->target_list_head;
+				while (target_list != NULL) {
+					target_block = get_block(target_list->inst, ht);
+					fprintf(ofp, "%lu:%lu ", target_block->block_id,
+					        target_list->count);
+					target_count++;
+					target_list = target_list->next;
+				}
+				fprintf(ofp, "] ");
+
+				if (entry->fall_thru_count > 0 && target_count == 0) {
+					fprintf(ofp, "NB\n");
+				}
+				else if (entry->fall_thru_count > 0 && target_count == 1) {
+					fprintf(ofp, "CB\n");
+				}
+				else if (entry->fall_thru_count == 0 && target_count == 1) {
+					fprintf(ofp, "UB\n");
+				}
+				else if (target_count > 1) {
+					fprintf(ofp, "IJ\n");
+				}
+				else {
+					fprintf(ofp, "\n");
+				}
 			}
 			entry = entry->next;
         }
