@@ -40,13 +40,9 @@ typedef struct block_hashtab_entry {
 	Instruction start_inst;
 	Instruction end_inst;
 	Instruction fall_thru_inst;
-	Instruction target_1_inst;
-	Instruction target_2_inst;
 	unsigned long block_id;
 	unsigned long exec_count;
 	unsigned long fall_thru_count;
-	unsigned long target_1_count;
-	unsigned long target_2_count;
 	Inst_list_entry *inst_list_head;
 	Inst_list_entry *inst_list_tail;
 	Target_list_entry *target_list_head;
@@ -94,8 +90,7 @@ void update_block_end(Instruction, Instruction, Block_hashtab *);
 Block_hashtab_entry *get_block_containing_inst(Instruction, Block_hashtab *);
 void split_block(Instruction, Instruction, Instruction, Block_hashtab *);
 void update_block_start(Instruction, Block_hashtab *);
-void update_target_count(Instruction, Instruction,
-                         Instruction, Block_hashtab *);
+void update_target_count(Instruction, Instruction, Block_hashtab *);
 void print_block_profile(Block_hashtab *);
 
 int main(int argc, char *argv[]) {
@@ -104,8 +99,8 @@ int main(int argc, char *argv[]) {
 		exit(1);
 	}
 	
-    FILE *ifp; // input file pointer
-	char line[MAXLINE];
+    FILE *ifp;          // input file pointer
+	char line[MAXLINE]; // max chars to be read from each line of input
     char *token;
 	//#######################
 	unsigned long line_num = 0; // shouldn't need this after testing
@@ -116,9 +111,11 @@ int main(int argc, char *argv[]) {
 	Instruction prev_inst;
 	prev_inst.addr = 0;
 	prev_inst.len = 0;
+	
 	Instruction curr_SBB_start_inst;
 	curr_SBB_start_inst.addr = 0;
 	curr_SBB_start_inst.len = 0;
+	
 	Instruction curr_DBB_start_inst;
 	curr_DBB_start_inst.addr = 0;
 	curr_DBB_start_inst.len = 0;
@@ -126,13 +123,11 @@ int main(int argc, char *argv[]) {
 	Boolean contig = FALSE; // is curr_addr contiguous from prev_addr?
 	Boolean prev_addr_end_SBB = FALSE; // must prev_addr end its SBB?
 	Boolean prev_addr_end_DBB = FALSE; // must prev_addr end its DBB?
-	Boolean fall_thru = FALSE; // was prev_addr a conditional branch not taken?
 	Block_hashtab *SBB_ht = NULL;
 	Block_hashtab *DBB_ht = NULL;
+	// note that jump_ht won't be used to generate output, only to store
+	// a list of known jump instructions for easy/quick lookup
 	Jump_hashtab *jump_ht = NULL;
-	//#######################
-	//Block_hashtab_entry *block = NULL;
-	//Jump_hashtab_entry *jump = NULL;
     
 	// open specified input file; check if successful
     ifp = fopen(argv[1], "r");
@@ -183,32 +178,26 @@ int main(int argc, char *argv[]) {
 		if (!contig) { // if contig == FALSE
 			prev_addr_end_SBB = TRUE;
 			prev_addr_end_DBB = TRUE;
-			fall_thru = FALSE;
 			// add prev_inst to list of jump instructions
 			// won't re-add if already there; will just return pointer
 			get_jump(prev_inst, jump_ht); // disregard return
 		}
 		else { // if contig == TRUE
-
-			
 			if (lookup_jump(prev_inst, jump_ht) != NULL) {
 				//#####################
 				//printf("lookup_jump not null\n");
 				prev_addr_end_SBB = TRUE;
 				prev_addr_end_DBB = TRUE;
-				fall_thru = TRUE;
 			}
 			else if ( lookup_block(curr_inst, SBB_ht) != NULL ) {
 				//#########################
 				//printf("lookup_jump null, but lookup block not null\n");
 				prev_addr_end_SBB = TRUE;
 				prev_addr_end_DBB = FALSE; // only if prev_inst was jump
-				fall_thru = FALSE;
 			}
 			else { // prev_inst not a jump & curr_inst not a target
 				prev_addr_end_SBB = FALSE;
 				prev_addr_end_DBB = FALSE;
-				fall_thru = FALSE;
 			}
 		}
 	
@@ -216,21 +205,18 @@ int main(int argc, char *argv[]) {
 		printf("contig = %d\n", contig);
 		printf("prev_end_SBB = %d\n", prev_addr_end_SBB);
 		printf("prev_end_DBB = %d\n", prev_addr_end_DBB);
-		//printf("fall_thru = %d\n", fall_thru);
 		
 		if (prev_addr_end_SBB) {
 			update_block_end(curr_SBB_start_inst, prev_inst, SBB_ht);
 			update_block_start(curr_inst, SBB_ht);
-			update_target_count(curr_SBB_start_inst, prev_inst,
-			                    curr_inst, SBB_ht);
+			update_target_count(curr_SBB_start_inst, curr_inst, SBB_ht);
 			curr_SBB_start_inst = curr_inst;
 		}
 
 		if (prev_addr_end_DBB) {
 			update_block_end(curr_DBB_start_inst, prev_inst, DBB_ht);
 			update_block_start(curr_inst, DBB_ht);
-			update_target_count(curr_DBB_start_inst, prev_inst,
-			                    curr_inst, DBB_ht);
+			update_target_count(curr_DBB_start_inst, curr_inst, DBB_ht);
 			curr_DBB_start_inst = curr_inst;
 		}
 		
@@ -271,7 +257,14 @@ void add_to_linked_list(Instruction start, Instruction curr,
 		// add curr to start's block's instructin linked list
 		// if not already there (if this is first time seeing block)
 		Block_hashtab_entry *block = get_block(start, ht);
-		//######### should test for null return from get_block() #########
+		if (block == NULL) {
+			// this should never happen; in theory, add_to_linked_list()
+			// will only be called if there's already a block for "start"
+			// but just in case...
+			perror("malloc failure in get_block()");
+			exit(1);
+		}
+
 		unsigned long tail_addr = block->inst_list_tail->inst.addr;
 		unsigned long tail_len = block->inst_list_tail->inst.len;
 		if (curr.addr == tail_addr + tail_len) {
@@ -365,14 +358,8 @@ void split_block(Instruction orig_block_start, Instruction orig_block_new_end,
 	// update new block
 	new_block->end_inst = orig_block->end_inst;
 	new_block->fall_thru_inst = orig_block->fall_thru_inst;
-	new_block->target_1_inst = orig_block->target_1_inst;
-	new_block->target_2_inst = orig_block->target_2_inst;
-
 	new_block->exec_count = orig_block->exec_count - 1;
 	new_block->fall_thru_count = orig_block->fall_thru_count;
-	new_block->target_1_count = orig_block->target_1_count;
-	new_block->target_2_count = orig_block->target_2_count;
-
 	new_block->target_list_head = orig_block->target_list_head;
 
 	// update original block
@@ -382,12 +369,6 @@ void split_block(Instruction orig_block_start, Instruction orig_block_new_end,
 	// every time until now, so fall_thru_count = exec_count - 1
 	orig_block->fall_thru_count = orig_block->exec_count - 1;
 	orig_block->target_list_head = NULL;
-	orig_block->target_1_inst.addr = 0;
-	orig_block->target_1_inst.len = 0;
-	orig_block->target_1_count = 0;
-	orig_block->target_2_inst.addr = 0;
-	orig_block->target_2_inst.len = 0;
-	orig_block->target_2_count = 0;
 
 	// split orig_block's Instruction linked list with new_block
 	free_inst_list(new_block->inst_list_head); // has one entry we don't want
@@ -457,8 +438,8 @@ void update_block_start(Instruction start, Block_hashtab *ht) {
 	current_block->exec_count += (1 + extra);
 }
 
-void update_target_count(Instruction start, Instruction jump,
-                         Instruction target, Block_hashtab *ht) {
+void update_target_count(Instruction start, Instruction target,
+                         Block_hashtab *ht) {
 	Block_hashtab_entry *block = get_block(start, ht);
 	
 	// if the target is the block's fall_thru_inst, increment & return
@@ -535,9 +516,7 @@ void print_block_profile(Block_hashtab *ht) {
 
 unsigned int hash(Instruction inst, unsigned int ht_size) {
 	// naive hashing function
-    //return (unsigned int) (inst.addr % ht_size);
     return (inst.addr % ht_size);
-	//################ is the cast necessary? #################
 }
 
 Block_hashtab *create_block_hashtab(unsigned int size, BB_Type block_type) {
@@ -576,7 +555,7 @@ Block_hashtab_entry *lookup_block(Instruction inst, Block_hashtab *ht) {
             return entry; // inst found as a ->start_inst in ht
 		}
 	}
-    return NULL;         // inst not found
+    return NULL; // inst not found
 }
 
 Block_hashtab_entry *get_block(Instruction inst, Block_hashtab *ht) {
@@ -602,17 +581,11 @@ Block_hashtab_entry *get_block(Instruction inst, Block_hashtab *ht) {
 		entry->end_inst.len = 0;
 		entry->fall_thru_inst.addr = 0;
 		entry->fall_thru_inst.len = 0;
-		entry->target_1_inst.addr = 0;
-		entry->target_1_inst.len = 0;
-		entry->target_2_inst.addr = 0;
-		entry->target_2_inst.len = 0;
 
 		entry->block_id = ht->block_id_counter; // give block its ID
 		ht->block_id_counter += 1; // get ID for next new block
 		entry->exec_count = 0;
 		entry->fall_thru_count = 0;
-		entry->target_1_count = 0;
-		entry->target_2_count = 0;
 		entry->target_list_head = NULL;
 
 		if ((entry->inst_list_head = create_inst_list_entry(inst)) == NULL) {
@@ -742,7 +715,7 @@ Jump_hashtab_entry *lookup_jump(Instruction inst, Jump_hashtab *ht) {
             return entry; // addr found as a ->start_addr in ht
 		}
 	}
-    return NULL;         // addr not found
+    return NULL; // addr not found
 }
 
 Jump_hashtab_entry *get_jump(Instruction inst, Jump_hashtab *ht) {
