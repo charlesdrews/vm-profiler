@@ -103,8 +103,6 @@ int main(int argc, char *argv[]) {
     FILE *ifp;          // input file pointer
 	char line[MAXLINE]; // max chars to be read from each line of input
     char *token;
-	//#######################
-	unsigned long line_num = 0; // shouldn't need this after testing
 	
 	Instruction curr_inst;
 	curr_inst.addr = 0;
@@ -156,10 +154,6 @@ int main(int argc, char *argv[]) {
 
 	// begin loop through lines of the input file
     while (fgets(line, MAXLINE, ifp) != NULL) {
-
-		//#################################################
-        line_num++; // testing only - stop after x lines
-
 		prev_inst = curr_inst;
         token = strtok(line, " ,"); // first token is addr type I/L/S/M
 		
@@ -170,9 +164,6 @@ int main(int argc, char *argv[]) {
 		curr_inst.addr = strtoul(strtok(NULL, " ,"), NULL, 16); // hexadecimal
 		curr_inst.len = strtoul(strtok(NULL, " ,"), NULL, 10);  // decimal
 
-		//###########################################
-		printf("\n%0#lx, %lu\n", curr_inst.addr, curr_inst.len);
-		
 		// test if jump just occured from prev_inst to curr_inst
 		contig = ((prev_inst.addr + prev_inst.len) == curr_inst.addr);
 
@@ -185,14 +176,10 @@ int main(int argc, char *argv[]) {
 		}
 		else { // if contig == TRUE
 			if (lookup_jump(prev_inst, jump_ht) != NULL) {
-				//#####################
-				//printf("lookup_jump not null\n");
 				prev_addr_end_SBB = TRUE;
 				prev_addr_end_DBB = TRUE;
 			}
 			else if ( lookup_block(curr_inst, SBB_ht) != NULL ) {
-				//#########################
-				//printf("lookup_jump null, but lookup block not null\n");
 				prev_addr_end_SBB = TRUE;
 				prev_addr_end_DBB = FALSE; // only if prev_inst was jump
 			}
@@ -202,10 +189,6 @@ int main(int argc, char *argv[]) {
 			}
 		}
 	
-		//#######################################
-		printf("contig = %d\n", contig);
-		printf("--- prev_end_SBB = %d\n", prev_addr_end_SBB);
-		
 		if (prev_addr_end_SBB) {
 			update_block_end(curr_SBB_start_inst, prev_inst, SBB_ht);
 			update_block_start(curr_inst, SBB_ht);
@@ -213,8 +196,6 @@ int main(int argc, char *argv[]) {
 			curr_SBB_start_inst = curr_inst;
 		}
 
-		//#######################################
-		printf("--- prev_end_DBB = %d\n", prev_addr_end_DBB);
 		if (prev_addr_end_DBB) {
 			update_block_end(curr_DBB_start_inst, prev_inst, DBB_ht);
 			update_block_start(curr_inst, DBB_ht);
@@ -226,9 +207,6 @@ int main(int argc, char *argv[]) {
 		// (will not re-add if seen before and already in list)
 		add_to_linked_list(curr_SBB_start_inst, curr_inst, SBB_ht);
 		add_to_linked_list(curr_DBB_start_inst, curr_inst, DBB_ht);
-
-		//#################################################
-		//if (line_num > 2000) break; // testing only - stop after x lines
 	}
 
 	// after loop ends curr_inst has last instruction
@@ -238,9 +216,7 @@ int main(int argc, char *argv[]) {
 	
 	// output
 	char *output_filename_prefix = strtok(argv[1], ".");
-	printf("\nSBB block profile:\n");
 	print_block_profile(output_filename_prefix, SBB_ht);
-	printf("\nDBB block profile:\n");
 	print_block_profile(output_filename_prefix, DBB_ht);
 
 	// wrap it up
@@ -278,9 +254,6 @@ void add_to_linked_list(Instruction start, Instruction curr,
 }
 
 void update_block_end(Instruction start, Instruction end, Block_hashtab *ht) {
-	//###############################################
-	printf("update_block_end()\n");
-
 	Block_hashtab_entry *containing_block;
 	Block_hashtab_entry *current_block;
 	Boolean subtract_one = FALSE;
@@ -301,8 +274,6 @@ void update_block_end(Instruction start, Instruction end, Block_hashtab *ht) {
 		subtract_one = (start.addr == containing_block->start_inst.addr);
 		split_block(containing_block->start_inst, end, new_block_start,
 		            subtract_one, ht);
-		//###################################
-		printf("split for new end\n");
 
 		// check if there is another containing_block
 		containing_block = get_block_containing_inst(end, ht);
@@ -321,10 +292,6 @@ void update_block_end(Instruction start, Instruction end, Block_hashtab *ht) {
 	if (current_block->end_inst.addr == 0) {
 		current_block->end_inst = end;
 		current_block->fall_thru_inst.addr = end.addr + end.len;
-		//################################
-		printf("block %0#lx ends with %0#lx\n",
-		        current_block->start_inst.addr,
-		        current_block->end_inst.addr);
 	}
 }
 
@@ -345,8 +312,6 @@ Block_hashtab_entry *get_block_containing_inst(Instruction inst,
 			if (entry->start_inst.addr < inst.addr &&
 			    entry->end_inst.addr > inst.addr) {
 				// inst is contained within the block
-				//#######################
-				printf("'containing' block found\n");
 				return entry;
 			}
 			entry = entry->next;
@@ -359,9 +324,6 @@ Block_hashtab_entry *get_block_containing_inst(Instruction inst,
 void split_block(Instruction orig_block_start, Instruction orig_block_new_end,
                  Instruction new_block_start, Boolean subtract_one,
                  Block_hashtab *ht) {
-	//###############################################
-	printf("split_block()\n");
-
 	Block_hashtab_entry *orig_block = get_block(orig_block_start, ht);
 	Block_hashtab_entry *new_block = get_block(new_block_start, ht);
 	Inst_list_entry *list;
@@ -393,9 +355,6 @@ void split_block(Instruction orig_block_start, Instruction orig_block_new_end,
 	orig_block->fall_thru_inst = new_block_start;
 	// original fell through every time until now
 	orig_block->fall_thru_count = new_block->exec_count;
-	//################################
-	printf(">>> block %0#lx ft_cnt: %lu\n", orig_block->start_inst.addr,
-			orig_block->fall_thru_count);
 	orig_block->target_list_head = NULL;
 
 	// split orig_block's Instruction linked list with new_block
@@ -417,15 +376,11 @@ void split_block(Instruction orig_block_start, Instruction orig_block_new_end,
 }
 
 void update_block_start(Instruction start, Block_hashtab *ht) {
-	//###############################################
-	printf("update_block_start()\n");
-
 	Block_hashtab_entry *containing_block;
 	Block_hashtab_entry *current_block;
 	Instruction orig_block_new_end;
 	Inst_list_entry *list;
 	Inst_list_entry *prev_list;
-	unsigned long extra = 0;
 
 	// test if "start" falls in the middle of any existing blocks
 	// but only for SBBs; don't care if a "leader" is within a DBB
@@ -451,8 +406,6 @@ void update_block_start(Instruction start, Block_hashtab *ht) {
 			// else subtract_one = FALSE
 			split_block(containing_block->start_inst,
 			                      orig_block_new_end, start, FALSE, ht);
-			//######################################3
-			printf("split for new start\n");
 
 			// check if there is another containing_block
 			containing_block = get_block_containing_inst(start, ht);
@@ -466,10 +419,6 @@ void update_block_start(Instruction start, Block_hashtab *ht) {
 		exit(1);
 	}
 	current_block->exec_count += 1;
-	//#############################
-	if (extra > 0) {
-		printf("adding extra %lu\n", extra);
-	}
 }
 
 void update_target_count(Instruction start, Instruction target,
@@ -628,10 +577,6 @@ void print_block_profile(char *output_filename_prefix, Block_hashtab *ht) {
 					        entry->fall_thru_count); 
 				}
 
-				//############################
-				unsigned long ec = 0;
-				ec = entry->fall_thru_count;
-
 				target_count = 0;
 				target_list = entry->target_list_head;
 				while (target_list != NULL) {
@@ -639,17 +584,7 @@ void print_block_profile(char *output_filename_prefix, Block_hashtab *ht) {
 					fprintf(ofp, "%lu:%lu ", target_block->block_id,
 					        target_list->count);
 					target_count++;
-					//#####################
-					ec += target_list->count;
-
 					target_list = target_list->next;
-				}
-				//############################
-				if (entry->exec_count != ec) {
-					printf("%0#lx: e_c=%lu, ec=%lu\n",
-							entry->start_inst.addr,
-							entry->exec_count,
-							ec);
 				}
 
 				fprintf(ofp, "] ");
