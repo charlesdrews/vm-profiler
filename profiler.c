@@ -228,7 +228,7 @@ int main(int argc, char *argv[]) {
 		add_to_linked_list(curr_DBB_start_inst, curr_inst, DBB_ht);
 
 		//#################################################
-		//if (line_num > 20) break; // testing only - stop after x lines
+		//if (line_num > 2000) break; // testing only - stop after x lines
 	}
 
 	// after loop ends curr_inst has last instruction
