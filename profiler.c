@@ -541,7 +541,7 @@ void print_block_profile(char *output_filename_prefix, Block_hashtab *ht,
 
 	fprintf(ofp, "------------------------------"
 		         "------------------------------\n"
-				 "\nID: start-#I-end #E desc [ TID:#E ]\n");
+				 "\nID: start-#I-end #E desc [ TID:#T ]\n");
 
     // iterate through ht's table array
     for (i = 0; i < ht->size; i++) {
