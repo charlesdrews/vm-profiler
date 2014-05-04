@@ -20,10 +20,11 @@ done
 
 # create ouput filename
 output="$(echo $exe | \
-	sed -e 's|^\(.*\)\(\.[^./]*\)$|\1|' \
-	    -e 's|^\([^/]*/\)*\([^./]*\)$|\2|')""_trace.txt"
+	sed -e 's|^\(.*\)\(\.[^./]*\)$|\1|')""_trace.txt"
+	#sed -e 's|^\(.*\)\(\.[^./]*\)$|\1|' \
+	#    -e 's|^\([^/]*/\)*\([^./]*\)$|\2|')""_trace.txt"
 	# 1st sed removes appended file extension if present
-	# 2nd sed removes prepended path if present
+	# 2nd sed removes prepended path if present (don't use for now)
 
 # run Valgrind with Lackey tool
 valgrind --log-fd=1 --tool=lackey --trace-mem=yes $exe$opts > $output
