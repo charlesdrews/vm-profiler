@@ -385,6 +385,7 @@ void split_block(Instruction orig_block_start, Instruction orig_block_new_end,
 		new_block->exec_count = orig_block->exec_count;
 	}
 	new_block->fall_thru_count = orig_block->fall_thru_count;
+	free_target_list(new_block->target_list_head); // in case entries present
 	new_block->target_list_head = orig_block->target_list_head;
 
 	// update original block
@@ -599,10 +600,10 @@ void print_block_profile(char *output_filename_prefix, Block_hashtab *ht) {
 				 "TID      = Target ID, the ID of each edge's target block\n"
 				 "#E       = number of times each edge was taken\n"
 	             "desc     = description of this block's ending instruction:\n"
-				 "               - NB = Not a Branch (falls-thru every time)\n"
-				 "               - CB = Conditional Branch\n"
-				 "               - UB = Unconditional Branch\n"
-				 "               - IJ = Indirect Jump (multiple targets)\n"
+				 "             - NB = Not a Branch (falls-thru every time)\n"
+				 "             - UB = Unconditional Branch\n"
+				 "             - CB = Conditional Branch\n"
+				 "             - IJ = Indirect Jump (multiple targets)\n"
 				 "\nID: [ TID:#E ] desc\n");
     // iterate through ht's table array
     for (i = 0; i < ht->size; i++) {
@@ -627,6 +628,10 @@ void print_block_profile(char *output_filename_prefix, Block_hashtab *ht) {
 					        entry->fall_thru_count); 
 				}
 
+				//############################
+				unsigned long ec = 0;
+				ec = entry->fall_thru_count;
+
 				target_count = 0;
 				target_list = entry->target_list_head;
 				while (target_list != NULL) {
@@ -634,8 +639,19 @@ void print_block_profile(char *output_filename_prefix, Block_hashtab *ht) {
 					fprintf(ofp, "%lu:%lu ", target_block->block_id,
 					        target_list->count);
 					target_count++;
+					//#####################
+					ec += target_list->count;
+
 					target_list = target_list->next;
 				}
+				//############################
+				if (entry->exec_count != ec) {
+					printf("%0#lx: e_c=%lu, ec=%lu\n",
+							entry->start_inst.addr,
+							entry->exec_count,
+							ec);
+				}
+
 				fprintf(ofp, "] ");
 
 				if (entry->fall_thru_count > 0 && target_count == 0) {
