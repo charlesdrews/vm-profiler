@@ -76,7 +76,7 @@ void split_block(Instruction, Instruction, Instruction, Boolean,
                  Block_hashtab *);
 void update_block_start(Instruction, Block_hashtab *);
 void update_target_count(Instruction, Instruction, Block_hashtab *);
-void print_block_profile(char *, Block_hashtab *);
+void print_block_profile(char *, Block_hashtab *, Boolean);
 
 unsigned int hash(Instruction, unsigned int);
 Block_hashtab *create_block_hashtab(unsigned int, BB_Type);
@@ -95,7 +95,11 @@ Jump_hashtab_entry *get_jump(Instruction, Jump_hashtab *);
 void free_jump_hashtab(Jump_hashtab *);
 
 int main(int argc, char *argv[]) {
-	if (argc != 2) {
+	if (argc < 2 || argc > 3) {
+		usage(argv[0]);
+		exit(1);
+	}
+	if (argc == 3 && strcmp(argv[2], "-a") != 0) {
 		usage(argv[0]);
 		exit(1);
 	}
@@ -122,6 +126,8 @@ int main(int argc, char *argv[]) {
 	Boolean contig = FALSE; // is curr_addr contiguous from prev_addr?
 	Boolean prev_addr_end_SBB = FALSE; // must prev_addr end its SBB?
 	Boolean prev_addr_end_DBB = FALSE; // must prev_addr end its DBB?
+	Boolean print_all = (argc == 3 && strcmp(argv[2], "-a") == 0);
+	
 	Block_hashtab *SBB_ht = NULL;
 	Block_hashtab *DBB_ht = NULL;
 	// note that jump_ht won't be used to generate output, only to store
@@ -216,8 +222,8 @@ int main(int argc, char *argv[]) {
 	
 	// output
 	char *output_filename_prefix = strtok(argv[1], ".");
-	print_block_profile(output_filename_prefix, SBB_ht);
-	print_block_profile(output_filename_prefix, DBB_ht);
+	print_block_profile(output_filename_prefix, SBB_ht, print_all);
+	print_block_profile(output_filename_prefix, DBB_ht, print_all);
 
 	// wrap it up
 	free_block_hashtab(SBB_ht);
@@ -228,7 +234,7 @@ int main(int argc, char *argv[]) {
 }
 
 void usage(char *exe) {
-    printf("Usage: %s address_stream_file.txt\n", exe);
+    printf("Usage: %s <address_stream_file>[ -a]\n", exe);
 }
 
 void add_to_linked_list(Instruction start, Instruction curr,
@@ -452,21 +458,25 @@ void update_target_count(Instruction start, Instruction target,
 	return;
 }
 
-void print_block_profile(char *output_filename_prefix, Block_hashtab *ht) {
+void print_block_profile(char *output_filename_prefix, Block_hashtab *ht,
+                         Boolean print_all) {
     FILE *ofp;
 	char *output_filename;
     unsigned int i = 0;
+	Boolean print_entry = FALSE;
+	Boolean skipped = FALSE;
     Block_hashtab_entry *entry;
 	Block_hashtab_entry *target_block;
 	Inst_list_entry *inst_list;
 	Target_list_entry *target_list;
 	unsigned long inst_count = 0;
 	unsigned long target_count = 0;
+	double p = 0;
 
     if (ht == NULL) {
         return;
 	}
-
+	
 	output_filename = malloc(strlen(output_filename_prefix) + \
 	                         strlen("_XBB_profile.txt") + 1);
 	strcpy(output_filename, output_filename_prefix);
@@ -483,85 +493,63 @@ void print_block_profile(char *output_filename_prefix, Block_hashtab *ht) {
         perror("Error");
         exit(1);
     }
-
 	free(output_filename);
 
 	// write "header" info to output file
 	if (ht->block_type == STATIC) {
-		fprintf(ofp, "STATIC Basic Block Profile\n");
+		fprintf(ofp, "------------------------------"
+		             "------------------------------\n"
+		             "STATIC Basic Block Profile\n");
 	}
 	else {
-		fprintf(ofp, "DYNAMIC Basic Block Profile\n");
+		fprintf(ofp, "------------------------------"
+		             "------------------------------\n"
+		             "DYNAMIC Basic Block Profile\n");
 	}
 
-	// write block profile to output file
-	fprintf(ofp, "\n--------------------------------------------------\n"
-	             "Block profile:\n"
-	             "ID      = unique block identifier number\n"
-	             "start   = address of block's starting instruction\n"
-				 "#I      = number of instructions in the block\n"
-	             "end     = address of block's ending instruction\n"
-				 "#E      = number of times the block was executed\n"
-				 "[edges] = list of outgoing edge targets by block ID\n"
-				 "\nID: start #I end #E [edges]\n");
-    // iterate through ht's table array
-    for (i = 0; i < ht->size; i++) {
-        entry = ht->table[i];
-        // iterate through linked list in table[i] starting w/ head
-        while (entry != NULL) {
-			if (entry->start_inst.addr != 0) {
-				// first instruction is "jump" from initialized zeros; ignore
-				
-				inst_list = entry->inst_list_head;
-				inst_count = 0;
-				while (inst_list != NULL) {
-					inst_count++;
-					inst_list = inst_list->next;
-				}
+	if (print_all) {
+		fprintf(ofp, "\nShowing ALL blocks and edges (option -a used)\n");
+	}
+	else {
+		fprintf(ofp, "\nThe profile ignores blocks executed fewer"
+		             " than 5 times.\n"
+		             "The edge lists ignore Indirect Jump paths taken on"
+		             " less\n    than 10%% of the jump's executions.\n"
+		             "Use option -a to show ALL blocks and paths/edges.\n");
+	}
 
-				fprintf(ofp, "%lu: %0#lx %lu %0#lx %lu [ ",
-				        entry->block_id, entry->start_inst.addr,
-				        inst_count, entry->end_inst.addr,
-				        entry->exec_count);
-
-				if (entry->fall_thru_count > 0) {
-					target_block = get_block(entry->fall_thru_inst, ht);
-					fprintf(ofp, "%lu ", target_block->block_id); 
-				}
-
-				target_list = entry->target_list_head;
-				while (target_list != NULL) {
-					target_block = get_block(target_list->inst, ht);
-					fprintf(ofp, "%lu ", target_block->block_id);
-					target_list = target_list->next;
-				}
-				fprintf(ofp, "]\n");
-			}
-			entry = entry->next;
-        }
-    }
-	
-	// write edge profile to output file
-	fprintf(ofp, "\n--------------------------------------------------\n"
-	             "Edge profile:\n"
+	fprintf(ofp, "\nProfile elements:\n"
 	             "ID       = unique block identifier number\n"
-				 "[TID:#E] = list of this block's outgoing edges\n"
-				 "TID      = Target ID, the ID of each edge's target block\n"
-				 "#E       = number of times each edge was taken\n"
+	             "start    = address of block's starting instruction\n"
+				 "#I       = number of instructions in the block\n"
+	             "end      = address of block's ending instruction\n"
+				 "#E       = number of times the block was executed\n"
 	             "desc     = description of this block's ending instruction:\n"
 				 "             - NB = Not a Branch (falls-thru every time)\n"
 				 "             - UB = Unconditional Branch\n"
 				 "             - CB = Conditional Branch\n"
 				 "             - IJ = Indirect Jump (multiple targets)\n"
-				 "\nID: [ TID:#E ] desc\n");
+				 "[TID:#T] = list of this block's outgoing edges\n"
+				 "TID      = Target ID, the ID of each edge's target block\n"
+				 "#T       = number of times each edge was taken\n"
+				 "(ft)     = this edge is a fall-thru to the next block\n");
+
+	if (!print_all) {
+		fprintf(ofp, "...      = some IJ edges not shown"
+		             " (use -a to show all)\n");
+	}
+
+	fprintf(ofp, "------------------------------"
+		         "------------------------------\n"
+				 "\nID: start-#I-end #E desc [ TID:#E ]\n");
+
     // iterate through ht's table array
     for (i = 0; i < ht->size; i++) {
         entry = ht->table[i];
         // iterate through linked list in table[i] starting w/ head
         while (entry != NULL) {
-			if (entry->start_inst.addr != 0) {
-				// first instruction is "jump" from initialized zeros; ignore
-				
+			print_entry = (print_all || entry->exec_count >= 5);
+			if (entry->start_inst.addr != 0 && print_entry) {
 				inst_list = entry->inst_list_head;
 				inst_count = 0;
 				while (inst_list != NULL) {
@@ -569,46 +557,82 @@ void print_block_profile(char *output_filename_prefix, Block_hashtab *ht) {
 					inst_list = inst_list->next;
 				}
 
-				fprintf(ofp, "%lu: [ ", entry->block_id);
-
-				if (entry->fall_thru_count > 0) {
-					target_block = get_block(entry->fall_thru_inst, ht);
-					fprintf(ofp, "%lu:%lu ", target_block->block_id,
-					        entry->fall_thru_count); 
-				}
+				fprintf(ofp, "%lu: %0#lx-%lu-%0#lx %lu ",
+				        entry->block_id, entry->start_inst.addr,
+				        inst_count, entry->end_inst.addr,
+				        entry->exec_count);
 
 				target_count = 0;
 				target_list = entry->target_list_head;
 				while (target_list != NULL) {
-					target_block = get_block(target_list->inst, ht);
-					fprintf(ofp, "%lu:%lu ", target_block->block_id,
-					        target_list->count);
 					target_count++;
 					target_list = target_list->next;
 				}
 
-				fprintf(ofp, "] ");
-
-				if (entry->fall_thru_count > 0 && target_count == 0) {
-					fprintf(ofp, "NB\n");
+				if (target_count == 0) {
+					fprintf(ofp, "NB [ ");
 				}
-				else if (entry->fall_thru_count > 0 && target_count == 1) {
-					fprintf(ofp, "CB\n");
+				else if (target_count == 1 && entry->fall_thru_count == 0) {
+					fprintf(ofp, "UB [ ");
 				}
-				else if (entry->fall_thru_count == 0 && target_count == 1) {
-					fprintf(ofp, "UB\n");
+				else if (target_count == 1 && entry->fall_thru_count > 0) {
+					fprintf(ofp, "CB [ ");
 				}
 				else if (target_count > 1) {
-					fprintf(ofp, "IJ\n");
+					fprintf(ofp, "IJ [ ");
 				}
 				else {
-					fprintf(ofp, "\n");
+					fprintf(ofp, "[ ");
+				}
+				
+				if (entry->fall_thru_count > 0) {
+					target_block = get_block(entry->fall_thru_inst, ht);
+					fprintf(ofp, "(ft)%lu:%lu ", target_block->block_id,
+					        entry->fall_thru_count); 
+				}
+				
+				skipped = FALSE;
+				if (target_count > 1 && !print_all) {
+					// if an IJ and -a option not used
+					target_list = entry->target_list_head;
+					while (target_list != NULL) {
+						target_block = get_block(target_list->inst, ht);
+						// test % of times each path is taken
+						// show only those taken >= 10% of the time
+						p = ((double) target_list->count) / \
+							((double) entry->exec_count);
+						if (p < 0.1) {
+							skipped = TRUE;
+						}
+						else {
+							fprintf(ofp, "%lu:%lu ", target_block->block_id,
+									target_list->count);
+						}
+						target_list = target_list->next;
+					}
+				}
+				else {
+					// if not an IJ or if -a option used
+					target_list = entry->target_list_head;
+					while (target_list != NULL) {
+						// put all paths in list
+						target_block = get_block(target_list->inst, ht);
+						fprintf(ofp, "%lu:%lu ", target_block->block_id,
+								target_list->count);
+						target_list = target_list->next;
+					}
+				}
+				
+				if (skipped) {
+					fprintf(ofp, "... ]\n");
+				}
+				else {
+					fprintf(ofp, "]\n");
 				}
 			}
 			entry = entry->next;
         }
     }
-	
 	fclose(ofp);
 }
 
