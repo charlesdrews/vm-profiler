@@ -1,0 +1,29 @@
+------------------------------------------------------------
+STATIC Basic Block Profile
+
+Showing ALL blocks and edges (option -a used)
+
+Profile elements:
+ID       = unique block identifier number
+start    = address of block's starting instruction
+#I       = number of instructions in the block
+end      = address of block's ending instruction
+#E       = number of times the block was executed
+desc     = description of this block's ending instruction:
+             - NB = Not a Branch (falls-thru every time)
+             - UB = Unconditional Branch
+             - CB = Conditional Branch
+             - IJ = Indirect Jump (multiple targets)
+[TID:#T] = list of this block's outgoing edges
+TID      = Target ID, the ID of each edge's target block
+#T       = number of times each edge was taken
+(ft)     = this edge is a fall-thru to the next block
+------------------------------------------------------------
+
+ID: start-#I-end #E desc [ TID:#T ]
+1: 0x1-2-0x3 1 NB [ (ft)3:1 ]
+3: 0x4-2-0x9 3 CB [ (ft)4:2 5:1 ]
+4: 0xa-3-0xf 2 UB [ 2:1 ]
+2: 0xb0-2-0xb2 1 NB [ (ft)5:1 ]
+5: 0xb3-3-0xb8 2 IJ [ 6:1 3:1 ]
+6: 0xc8-2-0xcb 1 UB [ 3:1 ]

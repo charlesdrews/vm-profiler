@@ -1,8 +1,5 @@
+exclude/*
 *.swp
-*_DBB_profile.txt
-*_SBB_profile.txt
-*.lyx
-*.lyx~
-*.lyx#
+*.lyx*
 *.pdf
 *.zip
